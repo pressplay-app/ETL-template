@@ -82,24 +82,21 @@ func LoadOutput() error {
 
 	finalOutputEncoder, finalOutputCloser, _, finalOutputFilePath, _ := tools.GetNextVersionedJSONLWriter(loadOutputStepName)
 	defer finalOutputCloser()
-	var recordsProcessed int64
+	
+	// Set the final output path in context for cleanup
+	tools.SetFinalOutputPath(finalOutputFilePath)
+	
 	err := tools.StreamJSONLRecords(tempInputFilePath, TransformedUserData{}, func(record interface{}) error {
 		transformedUser, _ := record.(*TransformedUserData)
 		if err := finalOutputEncoder.Encode(transformedUser); err != nil {
 			return fmt.Errorf("%s: failed to encode record %+v to final output %s: %w", loadOutputStepName, transformedUser, finalOutputFilePath, err)
 		}
-		recordsProcessed++
+		tools.IncrementRecordsProcessed()
 		return nil
 	})
 
-	// Handle cleanup and recovery using centralized tools function
-	return tools.HandleFileCleanupAfterProcessing(
-		loadOutputStepName,
-		err,
-		finalOutputFilePath,
-		tempInputFilePath,
-		recordsProcessed,
-	)
+	// Handle cleanup using simplified context-based function
+	return tools.HandleFileCleanupAfterProcessingSimplified(err)
 }
 
 func main() {

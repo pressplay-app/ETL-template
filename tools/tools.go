@@ -78,14 +78,16 @@ type RecordLoader func(transformedRecord interface{}) (err error)
 
 // StepContext holds context information for the currently executing step
 type StepContext struct {
-	StepName    string
-	Encoder     *json.Encoder
-	Closer      func() error
-	FilePath    string
-	Version     int
-	TempEncoder *json.Encoder
-	TempCloser  func() error
-	TempFilePath string
+	StepName         string
+	Encoder          *json.Encoder
+	Closer           func() error
+	FilePath         string
+	Version          int
+	TempEncoder      *json.Encoder
+	TempCloser       func() error
+	TempFilePath     string
+	FinalOutputPath  string  // For load steps - tracks the final output file path
+	RecordsProcessed int64   // For load steps - tracks number of records processed
 }
 
 // Global step context
@@ -1029,6 +1031,23 @@ func HandleFileCleanupAfterProcessing(
 	return nil
 }
 
+// HandleFileCleanupAfterProcessingSimplified handles cleanup logic using context.
+// This is the simplified version that users should call - it uses the current step context
+// to automatically determine all the necessary file paths and step information.
+func HandleFileCleanupAfterProcessingSimplified(processingErr error) error {
+	if currentStepContext == nil {
+		return fmt.Errorf("no step context available for file cleanup")
+	}
+
+	return HandleFileCleanupAfterProcessing(
+		currentStepContext.StepName,
+		processingErr,
+		currentStepContext.FinalOutputPath,
+		currentStepContext.TempFilePath,
+		currentStepContext.RecordsProcessed,
+	)
+}
+
 // ----------------------------------------------------------------------------
 // Internal Helpers
 // ----------------------------------------------------------------------------
@@ -1144,6 +1163,28 @@ func GetCurrentFilePath() string {
 		return currentStepContext.FilePath
 	}
 	return ""
+}
+
+// SetFinalOutputPath sets the final output file path in the current context
+func SetFinalOutputPath(path string) {
+	if currentStepContext != nil {
+		currentStepContext.FinalOutputPath = path
+	}
+}
+
+// IncrementRecordsProcessed increments the records processed counter
+func IncrementRecordsProcessed() {
+	if currentStepContext != nil {
+		currentStepContext.RecordsProcessed++
+	}
+}
+
+// GetRecordsProcessed returns the current records processed count
+func GetRecordsProcessed() int64 {
+	if currentStepContext != nil {
+		return currentStepContext.RecordsProcessed
+	}
+	return 0
 }
 
 // ProcessStreamedRecordsSimplified processes records with simplified interface
