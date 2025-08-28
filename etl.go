@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os" // Keep for Fprintf if used directly
 	"time"
 
 	"github.com/arbirk/ETL-template/tools"
@@ -93,24 +92,14 @@ func LoadOutput() error {
 		return nil
 	})
 
-	if err != nil {
-		// Attempt to remove partially written final output file on error
-		if removeErr := os.Remove(finalOutputFilePath); removeErr != nil {
-			fmt.Printf("%s: Warning - failed to remove partially written final output file %s on error: %v\n", loadOutputStepName, finalOutputFilePath, removeErr)
-		}
-		return fmt.Errorf("%s: failed to process records from %s: %w", loadOutputStepName, tempInputFilePath, err)
-	}
-
-	fmt.Printf("%s: Successfully processed %d records from %s to %s.\n", loadOutputStepName, recordsProcessed, tempInputFilePath, finalOutputFilePath)
-
-	// Clean up the temporary input file
-	if err := os.Remove(tempInputFilePath); err != nil {
-		fmt.Printf("%s: Warning - failed to remove temporary input file %s: %v\n", loadOutputStepName, tempInputFilePath, err)
-	} else {
-		fmt.Printf("%s: Successfully removed temporary input file %s.\n", loadOutputStepName, tempInputFilePath)
-	}
-
-	return nil
+	// Handle cleanup and recovery using centralized tools function
+	return tools.HandleFileCleanupAfterProcessing(
+		loadOutputStepName,
+		err,
+		finalOutputFilePath,
+		tempInputFilePath,
+		recordsProcessed,
+	)
 }
 
 func main() {

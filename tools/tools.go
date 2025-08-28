@@ -995,6 +995,41 @@ func (lpm *LoopProgressManager) Finish() {
 }
 
 // ----------------------------------------------------------------------------
+// File Cleanup & Recovery Utilities
+// ----------------------------------------------------------------------------
+
+// HandleFileCleanupAfterProcessing handles cleanup logic after processing records.
+// This centralizes the recovery pattern used across ETL steps:
+// - On error: attempts to remove partially written output files
+// - On success: logs success and attempts to remove temporary input files
+func HandleFileCleanupAfterProcessing(
+	stepName string,
+	processingErr error,
+	finalOutputFilePath string,
+	tempInputFilePath string,
+	recordsProcessed int64,
+) error {
+	if processingErr != nil {
+		// Attempt to remove partially written final output file on error
+		if removeErr := os.Remove(finalOutputFilePath); removeErr != nil {
+			fmt.Printf("%s: Warning - failed to remove partially written final output file %s on error: %v\n", stepName, finalOutputFilePath, removeErr)
+		}
+		return fmt.Errorf("%s: failed to process records from %s: %w", stepName, tempInputFilePath, processingErr)
+	}
+
+	fmt.Printf("%s: Successfully processed %d records from %s to %s.\n", stepName, recordsProcessed, tempInputFilePath, finalOutputFilePath)
+
+	// Clean up the temporary input file on success
+	if err := os.Remove(tempInputFilePath); err != nil {
+		fmt.Printf("%s: Warning - failed to remove temporary input file %s: %v\n", stepName, tempInputFilePath, err)
+	} else {
+		fmt.Printf("%s: Successfully removed temporary input file %s.\n", stepName, tempInputFilePath)
+	}
+
+	return nil
+}
+
+// ----------------------------------------------------------------------------
 // Internal Helpers
 // ----------------------------------------------------------------------------
 
