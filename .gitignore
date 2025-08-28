@@ -26,3 +26,9 @@ go.work.sum
 
 # temp folder
 temp/
+
+# output folder
+output/
+
+# built binary
+ETL-template

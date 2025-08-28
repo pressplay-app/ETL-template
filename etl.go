@@ -25,14 +25,10 @@ type TransformedUserData struct {
 //goetl:type=extract versioned next=MainLoop
 func ExtractUsers() error {
 	fmt.Println("Extracting users...")
-
-	encoder, closer, version, filePath, err := tools.GetNextVersionedJSONLWriter("ExtractUsers") // Pass step name directly
-	if err != nil {
-		return err
-	}
-	defer closer()
-	fmt.Printf("Extracting users to version %d at %s\n", version, filePath)
-
+	
+	encoder := tools.GetCurrentEncoder()
+	filePath := tools.GetCurrentFilePath()
+	
 	users := []UserData{
 		{ID: "4", Name: "Karen"},
 		{ID: "5", Name: "Kevin"},
@@ -46,7 +42,7 @@ func ExtractUsers() error {
 			return fmt.Errorf("encoding user %+v to %s: %w", user, filePath, err)
 		}
 	}
-	fmt.Printf("Users extracted successfully to %s (Version %d)\n", filePath, version)
+	fmt.Printf("Users extracted successfully to %s\n", filePath)
 	return nil
 }
 
@@ -70,38 +66,18 @@ func loadSingleRecord(tUser TransformedUserData, encoder *json.Encoder) error {
 
 //goetl:type=loop versioned_input=extract/ExtractUsers next=FinalSummary (example next step)
 func MainLoop() error {
-	fmt.Println("Starting MainLoop...")
-	loopStepName := "MainLoop"
-	inputProducerStepName := "ExtractUsers"
-	inputFilePath, _, err := tools.GetLatestVersionedFilePath(inputProducerStepName)
-	tempOutputFilePath, err := tools.GetTempFilePath(loopStepName, "loaded_records.jsonl") // Fixed parenthesis
-	tempEncoder, tempCloser, err := tools.NewJSONLWriter(tempOutputFilePath)
-	defer tempCloser() // Ensure closer is called
-
-	err = tools.ProcessStreamedRecords(
-		loopStepName,
-		inputFilePath,
+	err := tools.ProcessStreamedRecordsSimplified(
 		UserData{},
-		tools.CreateTransformer(func(ud *UserData) (TransformedUserData, error) { return transformSingleRecord(*ud) }),
-		tools.CreateLoader(func(tud TransformedUserData) error { return loadSingleRecord(tud, tempEncoder) }),
+		transformSingleRecord,
+		loadSingleRecord,
 	)
-
-	if err != nil {
-		// Attempt to remove partially written temp file on error TODO: move to tools
-		if removeErr := os.Remove(tempOutputFilePath); removeErr != nil {
-			fmt.Printf("Warning: failed to remove temp output file %s on error: %v\n", tempOutputFilePath, removeErr)
-		}
-		return fmt.Errorf("%s execution failed: %w", loopStepName, err) // Wrapped error
-	}
-
-	fmt.Printf("%s completed. Temporary loaded data at: %s\n", loopStepName, tempOutputFilePath) // Added success message back
-	return nil
+	return err
 }
 
 //goetl:type=load versioned_input=temp/MainLoop/loaded_records.jsonl
 func LoadOutput() error {
 	loadOutputStepName := "LoadOutput"
-	mainLoopStepName := "MainLoop" // The step that produced the temporary input
+	mainLoopStepName := "MainLoop"
 	tempInputFileName := "loaded_records.jsonl"
 
 	fmt.Printf("Starting %s...\n", loadOutputStepName)
@@ -120,7 +96,6 @@ func LoadOutput() error {
 		return nil
 	})
 
-    // TODO: Handle recovery in tools
 	if err != nil {
 		// Attempt to remove partially written final output file on error
 		if removeErr := os.Remove(finalOutputFilePath); removeErr != nil {
@@ -131,9 +106,7 @@ func LoadOutput() error {
 
 	fmt.Printf("%s: Successfully processed %d records from %s to %s.\n", loadOutputStepName, recordsProcessed, tempInputFilePath, finalOutputFilePath)
 
-	// 4. Optionally, clean up the temporary input file from MainLoop if everything was successful
-	//    Be cautious with this if other processes might need the temp file or for debugging.
-	//    If MainLoop might be re-run and produce a new temp file, deleting the old one is usually fine.
+	// Clean up the temporary input file
 	if err := os.Remove(tempInputFilePath); err != nil {
 		fmt.Printf("%s: Warning - failed to remove temporary input file %s: %v\n", loadOutputStepName, tempInputFilePath, err)
 	} else {
@@ -145,15 +118,10 @@ func LoadOutput() error {
 
 func main() {
 	tools.Knoll()
-
-	finalStatusFile := "output/status/etl_run_status.json"
-
-	run := tools.NewPipelineRun(finalStatusFile)
-	run.LogStatus() // Log initial status
-
+	run := tools.NewPipelineRun("output/status/etl_run_status.json")
+	run.LogStatus()
 	run.ExecuteStep("ExtractUsers", ExtractUsers)
-	run.ExecuteStep("MainLoop", MainLoop) // TODO: Add progress bar to tools
-	run.ExecuteStep("LoadOutput", LoadOutput) // Ensure LoadOutput is called
-
+	run.ExecuteStep("MainLoop", MainLoop)
+	run.ExecuteStep("LoadOutput", LoadOutput)
 	run.Stow() // This will save status if successful
 }
