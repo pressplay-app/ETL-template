@@ -1055,9 +1055,31 @@ func InitStepContext(stepName string, stepType string) error {
 		currentStepContext.FilePath = filePath
 		currentStepContext.Version = version
 		fmt.Printf("Extracting %s to version %d at %s\n", stepName, version, filePath)
+	} else if stepType == "load" {
+		// For load steps, prepare the input file path
+		mainLoopStepName := "MainLoop"
+		tempInputFileName := "loaded_records.jsonl"
+		tempInputFilePath, _ := GetTempFilePath(mainLoopStepName, tempInputFileName)
+		currentStepContext.TempFilePath = tempInputFilePath
 	}
 	
 	return nil
+}
+
+// GetTempInputFilePath returns the temp input file path for load steps
+func GetTempInputFilePath() string {
+	if currentStepContext != nil {
+		return currentStepContext.TempFilePath
+	}
+	return ""
+}
+
+// GetStepName returns the current step name
+func GetStepName() string {
+	if currentStepContext != nil {
+		return currentStepContext.StepName
+	}
+	return ""
 }
 
 // CleanupStepContext cleans up the current step context

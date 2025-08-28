@@ -76,16 +76,13 @@ func MainLoop() error {
 
 //goetl:type=load versioned_input=temp/MainLoop/loaded_records.jsonl
 func LoadOutput() error {
-	loadOutputStepName := "LoadOutput"
-	mainLoopStepName := "MainLoop"
-	tempInputFileName := "loaded_records.jsonl"
-
+	loadOutputStepName := tools.GetStepName()
+	tempInputFilePath := tools.GetTempInputFilePath()
+	
 	fmt.Printf("Starting %s...\n", loadOutputStepName)
-	tempInputFilePath, _ := tools.GetTempFilePath(mainLoopStepName, tempInputFileName)
 
 	finalOutputEncoder, finalOutputCloser, _, finalOutputFilePath, _ := tools.GetNextVersionedJSONLWriter(loadOutputStepName)
 	defer finalOutputCloser()
-
 	var recordsProcessed int64
 	err := tools.StreamJSONLRecords(tempInputFilePath, TransformedUserData{}, func(record interface{}) error {
 		transformedUser, _ := record.(*TransformedUserData)
