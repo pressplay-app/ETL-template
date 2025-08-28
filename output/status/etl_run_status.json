@@ -1,0 +1,26 @@
+{
+  "runId": "run_20250828_203652.687",
+  "startTime": "2025-08-28T20:36:52.687051886Z",
+  "overallStatus": "Completed",
+  "steps": [
+    {
+      "stepName": "ExtractUsers",
+      "status": "Completed",
+      "startTime": "2025-08-28T20:36:52.687115625Z",
+      "endTime": "2025-08-28T20:36:52.687292095Z"
+    },
+    {
+      "stepName": "MainLoop",
+      "status": "Completed",
+      "startTime": "2025-08-28T20:36:52.687373016Z",
+      "endTime": "2025-08-28T20:36:52.689125638Z",
+      "durationMillis": 1
+    },
+    {
+      "stepName": "LoadOutput",
+      "status": "Completed",
+      "startTime": "2025-08-28T20:36:52.689209585Z",
+      "endTime": "2025-08-28T20:36:52.689403286Z"
+    }
+  ]
+}
