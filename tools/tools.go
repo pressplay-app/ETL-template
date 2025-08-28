@@ -76,6 +76,21 @@ type RecordTransformer func(rawRecord interface{}) (transformedRecord interface{
 // RecordLoader defines a function that takes a transformed record and attempts to load it, returning an error.
 type RecordLoader func(transformedRecord interface{}) (err error)
 
+// StepContext holds context information for the currently executing step
+type StepContext struct {
+	StepName    string
+	Encoder     *json.Encoder
+	Closer      func() error
+	FilePath    string
+	Version     int
+	TempEncoder *json.Encoder
+	TempCloser  func() error
+	TempFilePath string
+}
+
+// Global step context
+var currentStepContext *StepContext
+
 // ----------------------------------------------------------------------------
 // Pipeline Lifecycle & Status Management
 // ----------------------------------------------------------------------------
@@ -96,8 +111,37 @@ func NewPipelineRun(statusFilePath string) *PipelineRun {
 // The pipeline will exit on the first error encountered in a step.
 func (pr *PipelineRun) ExecuteStep(stepName string, stepFunc func() error) {
 	pr.StartStep(stepName)
+	
+	// Initialize step context based on step name
+	var stepType string
+	switch stepName {
+	case "ExtractUsers":
+		stepType = "extract"
+	case "MainLoop":
+		stepType = "loop"
+	case "LoadOutput":
+		stepType = "load"
+	default:
+		stepType = "unknown"
+	}
+	
+	// Initialize context if needed
+	if stepType != "unknown" {
+		if err := InitStepContext(stepName, stepType); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to initialize context for step '%s': %v\n", stepName, err)
+			pr.EndStep(stepName, err)
+			pr.LogStatus()
+			os.Exit(1)
+			return
+		}
+	}
 
 	err := stepFunc()
+	
+	// Cleanup context
+	if stepType != "unknown" {
+		CleanupStepContext()
+	}
 
 	pr.EndStep(stepName, err)
 	pr.LogStatus()
@@ -987,4 +1031,170 @@ func getCallerFunctionName(skip int) string {
 		name = name[closingParen+1:] // Assumes method name follows immediately
 	}
 	return name
+}
+
+// ----------------------------------------------------------------------------
+// Simplified ETL Interface Functions
+// ----------------------------------------------------------------------------
+
+// InitStepContext initializes context for a step with automatic encoder setup
+func InitStepContext(stepName string, stepType string) error {
+	if currentStepContext != nil && currentStepContext.Closer != nil {
+		currentStepContext.Closer()
+	}
+	
+	currentStepContext = &StepContext{StepName: stepName}
+	
+	if stepType == "extract" {
+		encoder, closer, version, filePath, err := GetNextVersionedJSONLWriter(stepName)
+		if err != nil {
+			return err
+		}
+		currentStepContext.Encoder = encoder
+		currentStepContext.Closer = closer
+		currentStepContext.FilePath = filePath
+		currentStepContext.Version = version
+		fmt.Printf("Extracting %s to version %d at %s\n", stepName, version, filePath)
+	} else if stepType == "load" {
+		// For load steps, prepare the input file path
+		mainLoopStepName := "MainLoop"
+		tempInputFileName := "loaded_records.jsonl"
+		tempInputFilePath, _ := GetTempFilePath(mainLoopStepName, tempInputFileName)
+		currentStepContext.TempFilePath = tempInputFilePath
+	}
+	
+	return nil
+}
+
+// GetTempInputFilePath returns the temp input file path for load steps
+func GetTempInputFilePath() string {
+	if currentStepContext != nil {
+		return currentStepContext.TempFilePath
+	}
+	return ""
+}
+
+// GetStepName returns the current step name
+func GetStepName() string {
+	if currentStepContext != nil {
+		return currentStepContext.StepName
+	}
+	return ""
+}
+
+// CleanupStepContext cleans up the current step context
+func CleanupStepContext() {
+	if currentStepContext != nil {
+		if currentStepContext.Closer != nil {
+			currentStepContext.Closer()
+		}
+		if currentStepContext.TempCloser != nil {
+			currentStepContext.TempCloser()
+		}
+		currentStepContext = nil
+	}
+}
+
+// GetCurrentEncoder returns the encoder for the current step context
+func GetCurrentEncoder() *json.Encoder {
+	if currentStepContext != nil {
+		return currentStepContext.Encoder
+	}
+	return nil
+}
+
+// GetCurrentFilePath returns the file path for the current step context
+func GetCurrentFilePath() string {
+	if currentStepContext != nil {
+		return currentStepContext.FilePath
+	}
+	return ""
+}
+
+// ProcessStreamedRecordsSimplified processes records with simplified interface
+func ProcessStreamedRecordsSimplified(
+	recordTemplate interface{},
+	transformFunc interface{}, // Will be cast to appropriate type
+	loadFunc interface{},      // Will be cast to appropriate type
+) error {
+	if currentStepContext == nil {
+		return fmt.Errorf("no step context available")
+	}
+	
+	stepName := currentStepContext.StepName
+	fmt.Printf("Starting %s...\n", stepName)
+	
+	inputStepName := "ExtractUsers" // For MainLoop, input comes from ExtractUsers
+	
+	inputFilePath, _, err := GetLatestVersionedFilePath(inputStepName)
+	if err != nil {
+		return err
+	}
+	
+	tempOutputFilePath, err := GetTempFilePath(stepName, "loaded_records.jsonl")
+	if err != nil {
+		return err
+	}
+	
+	tempEncoder, tempCloser, err := NewJSONLWriter(tempOutputFilePath)
+	if err != nil {
+		return err
+	}
+	currentStepContext.TempEncoder = tempEncoder
+	currentStepContext.TempCloser = tempCloser
+	currentStepContext.TempFilePath = tempOutputFilePath
+	
+	// Create transformer that works with any function signature
+	transformer := func(rawRecord interface{}) (interface{}, error) {
+		// Use reflection to call the transform function
+		transformVal := reflect.ValueOf(transformFunc)
+		args := []reflect.Value{reflect.ValueOf(rawRecord).Elem()}
+		results := transformVal.Call(args)
+		
+		if len(results) != 2 {
+			return nil, fmt.Errorf("transform function must return (result, error)")
+		}
+		
+		if !results[1].IsNil() {
+			return nil, results[1].Interface().(error)
+		}
+		
+		return results[0].Interface(), nil
+	}
+	
+	// Create loader that works with any function signature
+	loader := func(transformedRecord interface{}) error {
+		loadVal := reflect.ValueOf(loadFunc)
+		args := []reflect.Value{reflect.ValueOf(transformedRecord), reflect.ValueOf(tempEncoder)}
+		results := loadVal.Call(args)
+		
+		if len(results) != 1 {
+			return fmt.Errorf("load function must return error")
+		}
+		
+		if !results[0].IsNil() {
+			return results[0].Interface().(error)
+		}
+		
+		return nil
+	}
+	
+	err = ProcessStreamedRecords(
+		stepName,
+		inputFilePath,
+		recordTemplate,
+		transformer,
+		loader,
+	)
+	
+	if err != nil {
+		// Attempt to remove partially written temp file on error
+		if removeErr := os.Remove(tempOutputFilePath); removeErr != nil {
+			fmt.Printf("Warning: failed to remove temp output file %s on error: %v\n", tempOutputFilePath, removeErr)
+		}
+		return fmt.Errorf("%s execution failed: %w", stepName, err)
+	}
+	
+	fmt.Printf("%s completed. Temporary loaded data at: %s\n", stepName, tempOutputFilePath)
+	return nil
 }
